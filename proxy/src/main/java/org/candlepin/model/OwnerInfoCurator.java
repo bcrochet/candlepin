@@ -21,8 +21,7 @@ import java.util.List;
 
 import javax.persistence.EntityManager;
 
-import org.candlepin.policy.js.ReadOnlyProduct;
-import org.candlepin.policy.js.ReadOnlyProductCache;
+import org.apache.log4j.Logger;
 import org.candlepin.service.ProductServiceAdapter;
 import org.hibernate.Criteria;
 import org.hibernate.Query;
@@ -55,7 +54,6 @@ public class OwnerInfoCurator {
     }
 
     public OwnerInfo lookupByOwner(Owner owner) {
-        ReadOnlyProductCache productCache = new ReadOnlyProductCache(this.productAdapter);
         OwnerInfo info = new OwnerInfo();
 
         List<ConsumerType> types = consumerTypeCurator.listAll();
@@ -97,8 +95,6 @@ public class OwnerInfoCurator {
                    null, null, null, null));
 
         for (Pool pool : owner.getPools()) {
-            String productId = pool.getProductId();
-
             // clients using the ownerinfo details are only concerned with pools
             // active *right now*
             if (now.before(pool.getStartDate()) || now.after(pool.getEndDate())) {
@@ -114,15 +110,14 @@ public class OwnerInfoCurator {
             }
 
             // do consumerTypeCountByPool
-            ReadOnlyProduct product = productCache.getProductById(productId);
-            String consumerType = getAttribute(pool, product, "requires_consumer_type");
+            String consumerType = getAttribute(pool, "requires_consumer_type");
             if (consumerType == null || consumerType.trim().equals("")) {
                 consumerType = DEFAULT_CONSUMER_TYPE;
             }
             ConsumerType ct = typeHash.get(consumerType);
             info.addToConsumerTypeCountByPool(ct);
 
-            consumerType = getAccumulatedAttribute(pool, product, "enabled_consumer_types");
+            consumerType = getAccumulatedAttribute(pool, "enabled_consumer_types");
             if (consumerType != null && !consumerType.trim().equals("")) {
                 for (String type : consumerType.split(",")) {
                     ct = typeHash.get(type);
@@ -133,7 +128,7 @@ public class OwnerInfoCurator {
             }
 
             // now do entitlementsConsumedByFamily
-            String productFamily = getAttribute(pool, product, "product_family");
+            String productFamily = getAttribute(pool, "product_family");
             // default bucket for familyless entitlements
             if (productFamily == null || productFamily.trim().equals("")) {
                 productFamily = "none";
@@ -141,7 +136,7 @@ public class OwnerInfoCurator {
 
             int count = getEntitlementCountForPool(pool);
 
-            if ("true".equals(getAttribute(pool, product, "virt_only"))) {
+            if ("true".equals(getAttribute(pool, "virt_only"))) {
                 info.addToEntitlementsConsumedByFamily(productFamily, 0, count);
             }
             else {
@@ -159,13 +154,12 @@ public class OwnerInfoCurator {
      * @param pool
      * @return
      */
-    private String getAttribute(Pool pool, ReadOnlyProduct product, String attribute) {
+    private String getAttribute(Pool pool, String attribute) {
         // XXX dealing with attributes in java. that's bad!
         String productFamily = pool.getAttributeValue(attribute);
         if (productFamily == null || productFamily.trim().equals("")) {
-            if (product != null) {
-                productFamily = product.getAttribute(attribute);
-            }
+            ProductPoolAttribute prodAttr = pool.getProductAttribute(attribute);
+            productFamily = prodAttr != null ? prodAttr.getValue() : productFamily;
         }
         return productFamily;
     }
@@ -174,15 +168,15 @@ public class OwnerInfoCurator {
      * @param pool
      * @return
      */
-    private String getAccumulatedAttribute(Pool pool, ReadOnlyProduct product,
-                                           String aType) {
+    private String getAccumulatedAttribute(Pool pool, String aType) {
         // XXX dealing with attributes in java. that's bad!
         String consumerTypes = pool.getAttributeValue(aType);
-        if (product != null) {
+        ProductPoolAttribute prodAttr = pool.getProductAttribute(aType);
+        if (prodAttr != null) {
             if (consumerTypes == null || consumerTypes.length() > 0) {
                 consumerTypes += ",";
             }
-            consumerTypes += product.getAttribute(aType);
+            consumerTypes += prodAttr.getValue();
         }
         return consumerTypes;
     }
